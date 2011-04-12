@@ -1,5 +1,5 @@
 .data
-filename:	.asciiz "long.bmp"
+filename:	.asciiz "b.bmp"
 new_filename:	.asciiz "output.bmp"
 thanks:		.asciiz "Program zakonczyl dzialanie, wynik dzialania zapisano w pliku "
 
@@ -126,6 +126,28 @@ p3l_loop: #process 3 lines loops
 ## NOW 3 LINES ARE ON STACK (showed by $t0), ACCTUAL PROCESSING HERE        
 ##################################################################################
 
+	li $t0, 1 # t1 is acctual pixel (from 1 to width-1)
+	addu $sp,$sp,-36 # miejsce na brightness + id pixela
+prl:
+	beq $t0,$s2,prl_end
+	move $t1,$sp
+	li $t9,0
+	lbl:	
+		bge $t9,9,lbl_end
+		move $a0,$t9
+		mul $t8,$t9,4
+		addu $t8,$t8,$sp
+		jal take_pixel
+		sw $a0, 0($t8)
+		addiu $t9,$t9,1
+		j lbl
+	lbl_end:
+				
+	addiu $t0,$t0,1
+	j prl
+prl_end:
+
+	addu $sp,$sp,36 # zwolnij miejsce na brightness + id pixela
 
 ##################################################################################		
 ## END OF ACTUAL PROCESSING							
@@ -219,3 +241,50 @@ exit:
 	li $v0, 10
 	syscall # exit program
 	
+take_pixel: # calculate $a0 pixel in block brightness and save in $a0 with id on more imporant 4 bits, need $t0 (acctual block offset) & fl,sl,tl to be set
+	# now sl+t0*pixel_size is acctual block center
+	# where pixel_size is 3bytes (R,G,B)	
+	ble $a0,2,rfl
+	ble $a0,5,rsl
+	
+	#read from 3rd line
+	lw $t2, tl
+	addiu $t6,$a0,-6
+	j end_read
+	
+	rsl:
+	#read from 2nd line
+	lw $t2, sl 
+	addiu $t6,$a0,-3	
+	j end_read
+	
+	rfl:
+	#read from 1st line
+	lw $t2, fl 	
+	move $t6,$a0
+	
+	end_read:
+	# now $t2 is begin of needed line counter
+	# and $t6 is pixel number in this line (with offset in $t0)
+	
+	mul $t3, $t0, 3
+	mul $t6, $t6, 3
+	addiu $t3, $t3, -3
+	addu $t3, $t3, $t6
+	addu $t3, $t3, $t2
+	# now $t3 shows needed pixel adress
+	
+	lb $t4,0($t3)
+	andi $t4,$t4,0x000000ff
+	lb $t5,1($t3)
+	andi $t5,$t5,0x000000ff
+	addu $t4,$t4,$t5
+	lb $t5,2($t3)
+	andi $t5,$t5,0x000000ff
+	addu $t4,$t4,$t5
+	
+	
+	sll $a0,$a0,16
+	addu $a0,$a0,$t4
+	
+	jr $ra
