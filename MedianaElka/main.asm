@@ -1,7 +1,13 @@
 .data
-filename:	.asciiz "b.bmp"
+filename:	.asciiz "long.bmp"
 new_filename:	.asciiz "output.bmp"
 thanks:		.asciiz "Program zakonczyl dzialanie, wynik dzialania zapisano w pliku "
+
+.align 2
+fl: .space 4 # current 1st line pointer
+sl: .space 4 # current 2nd line pointer
+tl: .space 4 # current 3rd line pointer
+
 .text
 main:	
 
@@ -57,6 +63,9 @@ main:
 	addiu $sp,$sp,54 # free stack of header information
 	## $t0 - FREE
 	
+	blt $s2,3,exit # if file is to small
+	blt $s3,3,exit # just do nothing about it
+	#@todo: probably it should rewrite image without any changes
 
 	## $t1 - 3 constans
 	li $t1,3
@@ -74,199 +83,116 @@ main:
 	## $t0 - old stack pointer
 	
 	subu $sp,$sp,$s6 # prepare stack to store the line 1
+	sw $sp,tl #save 3rd line pointer
+		
 	subu $sp,$sp,$s6 # prepare stack to store the line 2
-	subu $sp,$sp,$s6 # prepare stack to store the line 3
-	# why so? multu, mflo, addu - same time, more illusive (overflow)
-	move $t0,$sp  # t0 is now old stack pointer
+	sw $sp,sl #save 2nd line pointer
 	
-	## $s7 - loop marker for a while
-	move $s7, $s3			
-p3l_loop: #process 3 lines loops
-	ble $s7,0, end_p3l_loop # while( lines_to_read > 0){
+	subu $sp,$sp,$s6 # prepare stack to store the line 3
+	sw $sp,fl #save 1st line pointer
+	
 	
 	## SYSCALL (read next line from source file)
 	li $v0, 14 # read-from-file service
 	move $a0, $s1 # show system file descriptor
+	lw $t0, fl
 	la $a1, 0($t0) # show system place for writing
 	move $a2, $s6 # limit is the line size
 	syscall # read whole line	
 	
-	bge $s7,3,dr3l
-	beq $s7,2,dr2l
-	j dr1l
-	
-	dr3l: # do read 3 lines
 	## SYSCALL (read next line from source file)		
-	## $t2 - place to write to next line
+	## $t0 - place to write to next line
 	li $v0, 14 # read-from-file service
-	addu $t2,$t0,$s6
-	la $a1, 0($t2)
+	lw $t0, sl
+	la $a1, 0($t0)
 	syscall # read whole line
 	
-	dr2l: # do read 2 line
 	## SYSCALL (read next line from source file)
 	li $v0, 14 # read-from-file service	
-	addu $t2,$t2,$s6
-	la $a1, 0($t2)
+	lw $t0, tl
+	la $a1, 0($t0)
 	syscall # read whole line
 	
-	dr1l: # do read 1 line
+	## $t0 - FREE
 	
-	# why 3 syscalls instead of one loop? it's faster - thats why.
-	## $t2 - free
+	
+	## $s7 - loop marker for a while
+	move $s7, $s3	
+	addu $s7, $s7, -3 #3 lines already loaded
+		
+p3l_loop: #process 3 lines loops	
 	
 ##################################################################################		
 ## NOW 3 LINES ARE ON STACK (showed by $t0), ACCTUAL PROCESSING HERE        
 ##################################################################################
 
 
-	addiu $sp, $sp, -36
-	move $t1, $sp
-	
-	li $t4,0
-	li $t3,0
-	li $t2,0
-	li $t8,0
-	li $t5,0
-	
-	# t0 - poczatek fragmentu stosu, skad czytamy (obszar pamieci zawierajacy 3 wczytane z pliku linie)
-	# t1 - poczatek fragmentu stosu, gdzie piszemy (obszar pamieci zarezerwowany na wyliczenie jasnosci 9 pixeli)
-	
-	read_9pixel_loop:
-		beq $t2,3,read_9pixel_loop_end
-		read_3pixel_loop:
-			beq $t3,3,read_3pixel_loop_end
-			read_3bytes_loop:
-				beq $t4,3,read_3bytes_loop_end
-				
-				li $t8,3
-				mult $t8,$t3
-				mflo $t8
-				
-				addu $t7,$t0,$t8
-				
-				mult $s6,$t2
-				mflo $t8
-				
-				addu $t7,$t7,$t8 # przesuniecie wynikajace z wiersza bitmapy
-				#addu $t7,$t7,$t0
-				addu $t7,$t7,$t4 # dodajemy do adresu pobranych danych offset wynikaj¹cy z kroku pêtli
-				
-				lb $t9, 0($t7) # pobieramy odpowiedni kolor (R, G albo B)
-				andi $t9,$t9,0x000000ff # nakladamy maske na odczytany bit, poniewaz lb nie gwarantuje nam co sie stanie z pozostala czescia slowa (dopelnia jedynkami), co mogloby nam popsuc dodawanie (obliczanie brightness'a)
-				addu $t6, $t6, $t9 # dodajemy brightness (R+G+B)				
-				addiu $t4,$t4,1 # czytaj kolejny bajt
-				j read_3bytes_loop
-			read_3bytes_loop_end:
-						
-			li $t8,4
-			mult $t5, $t8
-			mflo $t8
-			
-			sll $t4, $t5, 16 # przesuwamy wartosc offsetu na drugi starszy bajt, zeby moc go nastepnie zsumowac z jasnoscia (ID pixela z kratki)
-			addu $t6,$t6,$t4
-			
-			li $t4,0 # przygotuj licznik petli read_3bytes_loop do kolejnego wejscia
-			
-			addu $t7,$t1,$t8 # dodajemy do adresu pobranych danych offset wynikaj¹cy z obiegu pêtli
-			sw $t6,0($t7) # zapisz odczytany brightness pixela (pixel = 3 bajty, brightness = B+B+B = 2B)
-			
-			li $t6,0 # wyczysc brightness, tak zeby moc wyliczyc go dla nowego pixela w nastepnym obiegu petli
-			
-			addiu $t3,$t3,1 # kolejny obieg petli
-			addiu $t5,$t5,1 # zapamietujemy ogolny offset dla zapisywanych danych
-			j read_3pixel_loop
-		read_3pixel_loop_end:
-		
-		li $t3, 0 # przygotuj licznik petli read_3pixel_loop do kolejnego wejscia
-		
-		addiu $t2,$t2,1 # kolejny obieg petli
-		j read_9pixel_loop
-	read_9pixel_loop_end:
-	
-	
-	## t2-t9 - FREE
-	
-	# process brightness (sort + find mediana)
-	# t2,t3 loops markers
-	li $t2,0
-	ls: #sort by brightness for mediana (on stack)
-		bge $t2,9,ls_end
-		li $t3,0
-		lsin:
-			bge $t3,9,lsin_end
-			mul $t6,$t3,4
-			addu $t6,$t1,$t6
-			lhu $t4,0($t6)
-			lhu $t5,4($t6)
-			bgt $t5, $t4, skip_swap
-			lb $t7,2($t6)
-			sll $t7,$t7,16
-			and $t4,$t4,$t7
-			lb $t7,6($t6)
-			sll $t7,$t7,16
-			and $t5,$t5,$t7
-			sw $t5,0($t6)
-			sw $t4,4($t6)
-			skip_swap:
-			addiu $t3,$t3,1
-			j lsin
-		lsin_end:
-		addiu $t2,$t2,1
-		j ls
-	ls_end:
-	
-	lb $t2, 18($t1) #tmp mediana id
-	 
-	
-	addiu $sp,$sp,36 # zwalniamy stos na brigthnessy
-	
-	
 ##################################################################################		
 ## END OF ACTUAL PROCESSING							
 ##################################################################################		
 
 
+
+
+	beqz $s7, end_p3l_loop #when no more lines, end loop
+	
 	## SYSCALL (write line to file)
 	li $v0, 15 # write-to-file service
 	move $a0, $s5 # show system file descriptor 
+	lw $t0, fl
 	la $a1, 0($t0) # show system place to read from
 	move $a2, $s6 # write a line size from showed pointer
 	syscall # write whole line
 	
-	## @todo: CARE, IF FILE HEIGHT % 3 ISNT EQUAL ZERO THAT WILL NOT WORK
-	bge $s7,3,dw3l
-	beq $s7,2,dw2l
-	j dw1l
+	## SYSCALL (read next line from source file)
+	li $v0, 14 # read-from-file service
+	move $a0, $s1 # show system file descriptor
+	lw $t0, fl
+	la $a1, 0($t0) # show system place for writing
+	move $a2, $s6 # limit is the line size
+	syscall # read whole line	
+	
+	## t0,$t1,$t2 - tmp value for swap
+	lw $t0,fl
+	lw $t1,sl
+	lw $t2,tl	
+	sw $t1,fl
+	sw $t2,sl
+	sw $t0,tl
+	## t0,$t1,$t2 - free
 
-	dw3l: # do write 3 lines			
-	## SYSCALL (write next line to result file)		
-	## $t2 - place to write to next line
-	li $v0, 15 # write-to-file service
-	addu $t2,$t0,$s6
-	la $a1, 0($t2)
-	syscall # write whole line
-
-	dw2l: # do write 2 lines		
-	## SYSCALL (write next line to result file)		
-	li $v0, 15 # write-to-file service
-	addu $t2,$t2,$s6
-	la $a1, 0($t2)
-	syscall # write whole line
-	
-	dw1l: # do write 1 line
-	
-	# why 3 syscalls instead of one loop? it's faster - thats why.
-	## $t2 - free
-	
-	addiu $s7,$s7,-3 # we made 3 lines
+	addiu $s7,$s7,-1 # we made 3 lines
 	j p3l_loop # }
 end_p3l_loop:
 
+	#@todo: save last 3 lines manualy
+	## SYSCALL (write line to file)
+	li $v0, 15 # write-to-file service
+	move $a0, $s5 # show system file descriptor 
+	lw $t0, fl
+	la $a1, 0($t0) # show system place to read from
+	move $a2, $s6 # write a line size from showed pointer
+	syscall # write whole line
+	
+	## SYSCALL (write next line to result file)
+	li $v0, 15 # write-to-file service
+	lw $t0, sl
+	la $a1, 0($t0)
+	syscall # write whole line
+	
+	## SYSCALL (write next line to result file)
+	li $v0, 15 # write-to-file service
+	lw $t0, tl
+	la $a1, 0($t0)
+	syscall # write whole line
+
+
+	## $s7 - FREE
 	# free stack of line information
 	addu $sp,$sp,$s6
-	## $t0 - FREE
-	## $s7 - FREE
+	addu $sp,$sp,$s6
+	addu $sp,$sp,$s6
+
 	
 exit:
 	## SYSCALL (close source file)
@@ -285,6 +211,8 @@ exit:
 	syscall # print(thanks)
 	la $a0, new_filename # show adress of end msg param
 	syscall # print(thanks_param)
+	#la $a0, newline # show adress of new line symbol
+	#syscall # print(nl)
 	
 	
 	## SYSCALL (end program)
