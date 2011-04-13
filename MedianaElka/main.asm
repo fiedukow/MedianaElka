@@ -1,5 +1,5 @@
 .data
-filename:	.asciiz "b.bmp"
+filename:	.asciiz "s.bmp"
 new_filename:	.asciiz "output.bmp"
 thanks:		.asciiz "Program zakonczyl dzialanie, wynik dzialania zapisano w pliku "
 
@@ -13,8 +13,8 @@ main:
 
 # s0 - source file name
 # s1 - file descriptor of source
-# s2 - width (same for both files)
-# s3 - height (same for both files)
+# s2 - width (same for both files) 
+# s3 - height (same for both files) 
 # s4 - result filename
 # s5 - file descriptor of result
 # s6 - bytes in one line with complement
@@ -126,24 +126,63 @@ p3l_loop: #process 3 lines loops
 ## NOW 3 LINES ARE ON STACK (showed by $t0), ACCTUAL PROCESSING HERE        
 ##################################################################################
 
-	li $t0, 1 # t1 is acctual pixel (from 1 to width-1)
+	li $t7, 1 # t7 is acctual pixel (from 1 to width-1)
 	addu $sp,$sp,-36 # miejsce na brightness + id pixela
 prl:
-	beq $t0,$s2,prl_end
-	move $t1,$sp
+	beq $t7,$s2,prl_end
 	li $t9,0
 	lbl:	
 		bge $t9,9,lbl_end
 		move $a0,$t9
 		mul $t8,$t9,4
 		addu $t8,$t8,$sp
-		jal take_pixel
+		jal take_pixel_b
 		sw $a0, 0($t8)
 		addiu $t9,$t9,1
 		j lbl
 	lbl_end:
+	
+	
+	# brightness with ids on stack now! sort and change center now.
+	
+	li $t0,0
+	li $t9,1
+	sort:
+		beq $t0, 8, sort_end
+		beqz $t9, sort_end
+		li $t1,0
+		li $t9, 0
+		sort_in:
+			li $t8,8
+			subu $t8, $t8, $t0
+			beq $t1, $t8, sort_in_end
+			mul $t2,$t1,4
+			addu $t2, $sp, $t2
+			lh $t3, 0($t2)
+			lh $t4, 4($t2)
+			bge $t4,$t3,skip_swap
+			li $t9,1
+			lw $t3, 0($t2)
+			lw $t4, 4($t2)
+			sw $t4, 0($t2)
+			sw $t3, 4($t2)
+			skip_swap:
+			addiu $t1,$t1,1
+			j sort_in
+		sort_in_end:
+		addiu $t0,$t0,1
+		j sort
+	sort_end:	
+	
+	#brightness sorted here, just change pixel to valid value now
+	lw $a0, 16($sp)
+	srl $a0,$a0,16
+	jal write_pixel
+	# now $t0 is valid pixel id
+	
+	
 				
-	addiu $t0,$t0,1
+	addiu $t7,$t7,1
 	j prl
 prl_end:
 
@@ -241,12 +280,12 @@ exit:
 	li $v0, 10
 	syscall # exit program
 	
-take_pixel: # calculate $a0 pixel in block brightness and save in $a0 with id on more imporant 4 bits, need $t0 (acctual block offset) & fl,sl,tl to be set
-	# now sl+t0*pixel_size is acctual block center
+take_pixel_b: # calculate $a0 pixel in block brightness and save in $a0 with id on more imporant 4 bits, need $t7 (acctual block offset) & fl,sl,tl to be set
+	# now sl+t1*pixel_size is acctual block center
 	# where pixel_size is 3bytes (R,G,B)	
 	ble $a0,2,rfl
 	ble $a0,5,rsl
-	
+	 
 	#read from 3rd line
 	lw $t2, tl
 	addiu $t6,$a0,-6
@@ -262,12 +301,12 @@ take_pixel: # calculate $a0 pixel in block brightness and save in $a0 with id on
 	#read from 1st line
 	lw $t2, fl 	
 	move $t6,$a0
-	
+	 
 	end_read:
 	# now $t2 is begin of needed line counter
 	# and $t6 is pixel number in this line (with offset in $t0)
 	
-	mul $t3, $t0, 3
+	mul $t3, $t7, 3
 	mul $t6, $t6, 3
 	addiu $t3, $t3, -3
 	addu $t3, $t3, $t6
@@ -286,5 +325,65 @@ take_pixel: # calculate $a0 pixel in block brightness and save in $a0 with id on
 	
 	sll $a0,$a0,16
 	addu $a0,$a0,$t4
+	
+	jr $ra
+
+
+write_pixel: # write $a0 pixel to 4pixel in block, need $t7 (acctual block offset) & fl,sl,tl to be set
+	# now sl+t1*pixel_size is acctual block center
+	# where pixel_size is 3bytes (R,G,B)	
+	ble $a0,2,rflw
+	ble $a0,5,rslw
+	
+	#read from 3rd line
+	lw $t2, tl
+	addiu $t6,$a0,-6
+	j end_readw
+	
+	rslw:
+	#read from 2nd line
+	lw $t2, sl 
+	addiu $t6,$a0,-3	
+	j end_readw
+	
+	rflw:
+	#read from 1st line
+	lw $t2, fl 	
+	move $t6,$a0
+	
+	end_readw:
+	# now $t2 is begin of needed line counter
+	# and $t6 is pixel number in this line (with offset in $t0)
+	
+	mul $t3, $t7, 3
+	
+	lw $t5,sl
+	addu $t5,$t5,$t3
+	
+	mul $t6, $t6, 3
+	addiu $t3, $t3, -3
+	addu $t3, $t3, $t6
+	addu $t3, $t3, $t2
+	# now $t3 shows needed pixel adress
+	
+
+	
+	lb $t4,0($t3)
+	andi $t4,$t4,0x000000ff
+	sb $t4,0($t5)
+	
+	#write new R
+	
+	lb $t4,1($t3)
+	andi $t4,$t4,0x000000ff
+	sb $t4,1($t5)
+	
+	#write new G
+	
+	lb $t4,2($t3)
+	andi $t4,$t4,0x000000ff
+	sb $t4,2($t5)
+	
+	#write new B
 	
 	jr $ra
