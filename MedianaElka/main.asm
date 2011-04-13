@@ -5,7 +5,7 @@
 filename:	.space 64
 new_filename:	.space 64
 #.align 2
-thanks:		.asciiz "Program zakonczyl dzialanie, wynik dzialania zapisano w pliku "
+thanks:		.asciiz "\nProgram zakonczyl dzialanie, wynik dzialania zapisano w pliku "
 question_s: 	.asciiz "Nazwa pliku do przerobienia (max. 64 znaki) > "
 question_t:	.asciiz "Nazwa pliku do zapisania wyniku (max. 64 znaki; UPRAWNIENIA ZAPISU!) > "
 newline: 	.asciiz "\n"
@@ -16,15 +16,14 @@ dot:		.asciiz "."
 fl: .space 4 # current 1st line pointer
 sl: .space 4 # current 2nd line pointer
 tl: .space 4 # current 3rd line pointer
+pl: .space 4 # current proccesed line result
 
 .text
 main:	
 
-# s0 - source file name
 # s1 - file descriptor of source
 # s2 - width (same for both files) 
 # s3 - height (same for both files) 
-# s4 - result filename
 # s5 - file descriptor of result
 # s6 - bytes in one line with complement
 	
@@ -146,6 +145,9 @@ main:
 	subu $sp,$sp,$s6 # prepare stack to store the line 3
 	sw $sp,fl #save 1st line pointer
 	
+	subu $sp,$sp,$s6 # prepare stack to store the line 3
+	sw $sp,pl #save 1st line pointer
+
 	
 	## SYSCALL (read next line from source file)
 	li $v0, 14 # read-from-file service
@@ -166,9 +168,18 @@ main:
 	li $v0, 14 # read-from-file service	
 	lw $t0, tl
 	la $a1, 0($t0)
-	syscall # read whole line
+	syscall # read whole line	
+	## $t0 - FREE	
 	
-	## $t0 - FREE
+	#@todo: save last 3 lines manualy
+	## SYSCALL (write line to file)
+	li $v0, 15 # write-to-file service
+	move $a0, $s5 # show system file descriptor 
+	lw $t0, fl
+	la $a1, 0($t0) # show system place to read from
+	move $a2, $s6 # write a line size from showed pointer
+	syscall # write whole line
+	
 	
 	
 	## $s7 - loop marker for a while
@@ -193,6 +204,25 @@ p3l_loop: #process 3 lines loops
 	li $t7, 1 # t7 is acctual pixel (from 1 to width-1)
 	addu $sp,$sp,-36 # miejsce na brightness + id pixela
 prl:
+	lw $t1, sl
+	lw $t2, pl
+	lb $t3, 0($t1)
+	sb $t3, 0($t2)
+	lb $t3, 1($t1)
+	sb $t3, 1($t2) 
+	lb $t3, 2($t1)
+	sb $t3, 2($t2)
+	mul $t4,$s2,3
+	addu $t1, $t1, $t4
+	addu $t2, $t2, $t4
+	lb $t3, -3($t1)
+	sb $t3, -3($t2)
+	lb $t3, -2($t1)
+	sb $t3, -2($t2)
+	lb $t3, -1($t1)
+	sb $t3, -1($t2)
+	
+			
 	beq $t7,$s2,prl_end
 	li $t9,0
 	lbl:	
@@ -212,7 +242,7 @@ prl:
 	li $t0,0
 	li $t9,1
 	sort:
-		beq $t0, 8, sort_end
+		beq $t0, 5, sort_end
 		beqz $t9, sort_end
 		li $t1,0
 		li $t9, 0
@@ -256,15 +286,13 @@ prl_end:
 ## END OF ACTUAL PROCESSING							
 ##################################################################################		
 
-
-
-
 	beqz $s7, end_p3l_loop #when no more lines, end loop
+	
 	
 	## SYSCALL (write line to file)
 	li $v0, 15 # write-to-file service
 	move $a0, $s5 # show system file descriptor 
-	lw $t0, fl
+	lw $t0, pl
 	la $a1, 0($t0) # show system place to read from
 	move $a2, $s6 # write a line size from showed pointer
 	syscall # write whole line
@@ -288,23 +316,17 @@ prl_end:
 
 	addiu $s7,$s7,-1 # we made 3 lines
 	j p3l_loop # }
-end_p3l_loop:
+end_p3l_loop: 
 
 	#@todo: save last 3 lines manualy
 	## SYSCALL (write line to file)
 	li $v0, 15 # write-to-file service
 	move $a0, $s5 # show system file descriptor 
-	lw $t0, fl
+	lw $t0, pl
 	la $a1, 0($t0) # show system place to read from
 	move $a2, $s6 # write a line size from showed pointer
 	syscall # write whole line
-	
-	## SYSCALL (write next line to result file)
-	li $v0, 15 # write-to-file service
-	lw $t0, sl
-	la $a1, 0($t0)
-	syscall # write whole line
-	
+
 	## SYSCALL (write next line to result file)
 	li $v0, 15 # write-to-file service
 	lw $t0, tl
@@ -421,7 +443,7 @@ write_pixel: # write $a0 pixel to 4pixel in block, need $t7 (acctual block offse
 	
 	mul $t3, $t7, 3
 	
-	lw $t5,sl
+	lw $t5,pl
 	addu $t5,$t5,$t3
 	
 	mul $t6, $t6, 3
