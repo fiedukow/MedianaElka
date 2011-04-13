@@ -1,7 +1,16 @@
 .data
-filename:	.asciiz "s.bmp"
-new_filename:	.asciiz "output.bmp"
+#filename:	.asciiz "qt.bmp"
+#new_filename:	.asciiz "output.bmp"
+#.align 2
+filename:	.space 64
+new_filename:	.space 64
+#.align 2
 thanks:		.asciiz "Program zakonczyl dzialanie, wynik dzialania zapisano w pliku "
+question_s: 	.asciiz "Nazwa pliku do przerobienia (max. 64 znaki) > "
+question_t:	.asciiz "Nazwa pliku do zapisania wyniku (max. 64 znaki; UPRAWNIENIA ZAPISU!) > "
+newline: 	.asciiz "\n"
+processing: 	.asciiz "Processing.."
+dot:		.asciiz "."
 
 .align 2
 fl: .space 4 # current 1st line pointer
@@ -18,6 +27,52 @@ main:
 # s4 - result filename
 # s5 - file descriptor of result
 # s6 - bytes in one line with complement
+	
+	li $v0,4
+	la $a0,question_s
+	syscall
+	
+	li $v0, 8
+	la $a0, filename
+	li $a1, 64
+	syscall
+		
+	li $v0,4
+	la $a0,question_t
+	syscall
+	
+	li $v0, 8
+	la $a0, new_filename
+	li $a1, 64
+	syscall
+	
+	#for(i=0;l[i]!='\n';++i);
+	#l[i]='\0';
+	li $t0, 0
+	la $t1, filename
+	no_nl:
+	 	addu $t2,$t1,$t0
+	 	lb $t3,0($t2)
+	 	bne $t3,10,skip_nl
+	 	sb $0, 0($t2)
+	 	j no_nl_end
+	 	skip_nl:
+	 	addiu $t0,$t0,1
+		j no_nl
+	no_nl_end:
+	
+	li $t0, 0
+	la $t1, new_filename
+	no_nln:
+	 	addu $t2,$t1,$t0
+	 	lb $t3,0($t2)
+	 	bne $t3,10,skip_nln
+	 	sb $0, 0($t2)
+	 	j no_nl_endn
+	 	skip_nln:
+	 	addiu $t0,$t0,1
+		j no_nln
+	no_nl_endn:
 
 
 	## SYSCALL (open file for reading, $s1 is file descriptor)
@@ -119,12 +174,21 @@ main:
 	## $s7 - loop marker for a while
 	move $s7, $s3	
 	addu $s7, $s7, -3 #3 lines already loaded
+	
+	li $v0,4
+	la $a0,processing
+	syscall
+	
 		
 p3l_loop: #process 3 lines loops	
 	
 ##################################################################################		
 ## NOW 3 LINES ARE ON STACK (showed by $t0), ACCTUAL PROCESSING HERE        
 ##################################################################################
+
+	li $v0,4
+	la $a0,dot
+	syscall
 
 	li $t7, 1 # t7 is acctual pixel (from 1 to width-1)
 	addu $sp,$sp,-36 # miejsce na brightness + id pixela
@@ -272,8 +336,8 @@ exit:
 	syscall # print(thanks)
 	la $a0, new_filename # show adress of end msg param
 	syscall # print(thanks_param)
-	#la $a0, newline # show adress of new line symbol
-	#syscall # print(nl)
+	la $a0, newline # show adress of new line symbol
+	syscall # print(nl)
 	
 	
 	## SYSCALL (end program)
