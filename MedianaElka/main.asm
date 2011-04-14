@@ -21,32 +21,44 @@ pl: .space 4 # current proccesed line result
 .text
 main:	
 
+# Register once set keep their value till the end:
 # s1 - file descriptor of source
 # s2 - width (same for both files) 
 # s3 - height (same for both files) 
 # s5 - file descriptor of result
 # s6 - bytes in one line with complement
 	
-	li $v0,4
-	la $a0,question_s
-	syscall
+##################################################################################		
+## ASKING USER FOR FILENAMES AND PROGRESSING IT
+##################################################################################
+
+	## SYSCALL (print first question)
+	li $v0,4 # print_string service
+	la $a0,question_s # show place where the string is
+	syscall # printf(question_s)
 	
-	li $v0, 8
-	la $a0, filename
-	li $a1, 64
-	syscall
-		
-	li $v0,4
-	la $a0,question_t
-	syscall
+	## SYSCALL (take filename of file to process)
+	li $v0, 8 # read_string service
+	la $a0, filename #show place for source filename (global variable)
+	li $a1, 64 # max. filename size is 64
+	syscall # scanf(source_filename, 64)
+
+	## SYSCALL (print second question)				
+	li $v0,4 # print_string service
+	la $a0,question_t # show place where the string is
+	syscall # printf(question_t)
 	
-	li $v0, 8
-	la $a0, new_filename
-	li $a1, 64
-	syscall
+	## SYSCALL (take filename of file for output)
+	li $v0, 8 # read-string service
+	la $a0, new_filename #show place for target filename (global variable)
+	li $a1, 64 # max. filename size is 64
+	syscall # scanf(target_filename, 64)
 	
 	#for(i=0;l[i]!='\n';++i);
 	#l[i]='\0';
+	# Change first \n to \0 in loaded filenames
+	
+	# changing in source_file
 	li $t0, 0
 	la $t1, filename
 	no_nl:
@@ -59,7 +71,9 @@ main:
 	 	addiu $t0,$t0,1
 		j no_nl
 	no_nl_end:
+
 	
+	# changing in target_file	
 	li $t0, 0
 	la $t1, new_filename
 	no_nln:
@@ -72,7 +86,14 @@ main:
 	 	addiu $t0,$t0,1
 		j no_nln
 	no_nl_endn:
+	
+	# Filenames are now valid (without \n in the end).
+	# All register FREE
 
+
+##################################################################################		
+## OPENING FILES WITH AND FOR DATA
+##################################################################################
 
 	## SYSCALL (open file for reading, $s1 is file descriptor)
 	li $v0, 13 # open-file service
@@ -82,23 +103,6 @@ main:
 	syscall # open file, $v0 gets file-descriptior	
 	move $s1, $v0 # let s1 be file descriptor for old file
 	
-	## $t0 - old stack pointer
-	
-
-	addiu $sp,$sp,-54 # make place for header (from old bmp)		
-	move $t0,$sp # t0 is now old stack pointer	
-	
-	## SYSCALL (read 54B of file to $t0 (place on stack))
-	li $v0, 14 # read-from-file service
-	move $a0,$s1 # give system file descriptor
-	la $a1,0($t0) # show place to write ($t0)
-	li $a2,54 # set 54B limit to read (header size)
-	syscall # read header of bmp
-
-	# Read bmp dimensions from header just read
-	lhu $s2,0x12($t0) # read width (stored on 2B)
-	lhu $s3,0x16($t0) # read height (stored on 2B)
-	
 	## SYSCALL (open file for writing (for save the result of program))
 	li $v0, 13 # open-file service
 	la $a0, new_filename # show file to write to
@@ -107,19 +111,57 @@ main:
 	syscall # open result file for writing, $v0 gets descriptor
 	move $s5, $v0 # let s5 be file descriptor for new file
 	
+	# Now needed files are opened
+	# For now:
+	# $s1 is source file descriptor
+	# $s5 is target file descriptor
+
+
+##################################################################################		
+## LOADING PROCESSING AND SAVING HEADER OF BITMAP
+##################################################################################
+
+	addiu $sp,$sp,-54 # make place for header (from old bmp)		
+	
+	## SYSCALL (read 54B of file to $t0 (place on stack))
+	li $v0, 14 # read-from-file service
+	move $a0,$s1 # give system file descriptor
+	la $a1,0($sp) # show place to write ($t0)
+	li $a2,54 # set 54B limit to read (header size)
+	syscall # read header of bmp
+
+	# Read bmp dimensions from header just read
+	lhu $s2,0x12($sp) # read width (stored on 2B)
+	lhu $s3,0x16($sp) # read height (stored on 2B)
+	
 	## SYSCALL (write 54B from stack to result file (header without any changes))
 	li $v0, 15 # write-to-file service
 	move $a0, $s5 # give system file dscriptor
-	la $a1, 0($t0) # show place to write from ($t0)
+	la $a1, 0($sp) # show place to write from ($t0)
 	li $a2, 54 #set 54B as number of bytes to write to file
 	syscall # write header to reslut file
 	
 	addiu $sp,$sp,54 # free stack of header information
-	## $t0 - FREE
 	
+	# Now header is written to target file
+	# For now:
+	# $s2 is width of image
+	# $s3 is height of image
+	
+
+##################################################################################		
+## JUST END UP PROGRAM IF FILE IS TO SMALL FOR THIS FILTER
+##################################################################################
+
 	blt $s2,3,exit # if file is to small
 	blt $s3,3,exit # just do nothing about it
 	#@todo: probably it should rewrite image without any changes
+	
+	# Now program ends if file is smaller then 3x3 in at least one dimension
+	
+##################################################################################		
+## CALCULATING LINE SIZE IN BYTES
+##################################################################################
 
 	## $t1 - 3 constans
 	li $t1,3
@@ -134,8 +176,13 @@ main:
 	
 	## $t1 - FREE
 	
-	## $t0 - old stack pointer
+	# For now:
+	# $s6 is number of bytes in line with complement
 	
+##################################################################################		
+## READING FIRST LINES (SAVING ONE OF THEM), PREPARING STACK FOR 4 LINES (3 readed, 1 for progress)
+##################################################################################
+		
 	subu $sp,$sp,$s6 # prepare stack to store the line 1
 	sw $sp,tl #save 3rd line pointer
 		
@@ -145,11 +192,11 @@ main:
 	subu $sp,$sp,$s6 # prepare stack to store the line 3
 	sw $sp,fl #save 1st line pointer
 	
-	subu $sp,$sp,$s6 # prepare stack to store the line 3
-	sw $sp,pl #save 1st line pointer
+	subu $sp,$sp,$s6 # prepare stack to store the result line
+	sw $sp,pl #save result (processing) line pointer
 
 	
-	## SYSCALL (read next line from source file)
+	## SYSCALL (read first line from source file)
 	li $v0, 14 # read-from-file service
 	move $a0, $s1 # show system file descriptor
 	lw $t0, fl
@@ -157,22 +204,22 @@ main:
 	move $a2, $s6 # limit is the line size
 	syscall # read whole line	
 	
-	## SYSCALL (read next line from source file)		
+	## SYSCALL (read second line from source file)		
 	## $t0 - place to write to next line
 	li $v0, 14 # read-from-file service
 	lw $t0, sl
 	la $a1, 0($t0)
 	syscall # read whole line
 	
-	## SYSCALL (read next line from source file)
+	## SYSCALL (read third line from source file)
 	li $v0, 14 # read-from-file service	
 	lw $t0, tl
 	la $a1, 0($t0)
 	syscall # read whole line	
 	## $t0 - FREE	
 	
-	#@todo: save last 3 lines manualy
-	## SYSCALL (write line to file)
+	
+	## SYSCALL (write first line to file (it dosn't change anyway)
 	li $v0, 15 # write-to-file service
 	move $a0, $s5 # show system file descriptor 
 	lw $t0, fl
@@ -180,30 +227,43 @@ main:
 	move $a2, $s6 # write a line size from showed pointer
 	syscall # write whole line
 	
+	# Now there is place on stack for 4 lines
+	# 3 lines are loaded
+	# first line is already in target file
+	# There are adresses of begining of first, second, third & processing line in memory under fl,sl,th,pl
 	
 	
+##################################################################################		
+## LOOPING THROUGH THE LINES
+##################################################################################
+			
 	## $s7 - loop marker for a while
 	move $s7, $s3	
 	addu $s7, $s7, -3 #3 lines already loaded
 	
-	li $v0,4
-	la $a0,processing
-	syscall
+	# SYSCALL (printf info about begining of progressing)
+	li $v0,4 # print_string service
+	la $a0,processing # show adres to read from
+	syscall # printf(Processing..)
 	
 		
 p3l_loop: #process 3 lines loops	
 	
+	# SYSCALL (printf dot for every line you progress)
+	li $v0,4 # print_string service
+	la $a0,dot # show adress to read from
+	syscall # printf(.)
+	
 ##################################################################################		
-## NOW 3 LINES ARE ON STACK (showed by $t0), ACCTUAL PROCESSING HERE        
+## NOW 3 LINES ARE ON STACK (showed by fl,sl,tl) ACCTUAL PROCESSING HERE, LOOPING THROUGH BLOCKS IN LINE
 ##################################################################################
 
-	li $v0,4
-	la $a0,dot
-	syscall
-
 	li $t7, 1 # t7 is acctual pixel (from 1 to width-1)
-	addu $sp,$sp,-36 # miejsce na brightness + id pixela
-prl:
+	addu $sp,$sp,-36 # make place on stack for brightness & pixel id
+
+prl: 
+
+	# WRITE TO RESULT LINE FIRST AND LAST PIXEL (UGLY BUT PROBABLY BETTER THEN LOOP)
 	lw $t1, sl
 	lw $t2, pl
 	lb $t3, 0($t1)
@@ -221,24 +281,26 @@ prl:
 	sb $t3, -2($t2)
 	lb $t3, -1($t1)
 	sb $t3, -1($t2)
+	# WRITE TO RESULT LINE FIRST AND LAST PIXEL - END
 	
-			
+	# Loading brightness with ids of acctual block		
 	beq $t7,$s2,prl_end
 	li $t9,0
 	lbl:	
-		bge $t9,9,lbl_end
-		move $a0,$t9
-		mul $t8,$t9,4
+		bge $t9,9,lbl_end # only ids 0-8 will be loaded
+		move $a0,$t9 # show the procedure id of pixel to load
+		jal take_pixel_b #call procedure, there is result in $a0
+		mul $t8,$t9,4 # calculete place on stack for becomed value
 		addu $t8,$t8,$sp
-		jal take_pixel_b
-		sw $a0, 0($t8)
-		addiu $t9,$t9,1
+		sw $a0, 0($t8) # store becomed pair id, brightness
+		addiu $t9,$t9,1 # progress next pixel in block
 		j lbl
 	lbl_end:
 	
 	
-	# brightness with ids on stack now! sort and change center now.
+	# Brightness with ids on stack now! sort and change center now.
 	
+	# Sorting brightnesses with ids (quick buble)
 	li $t0,0
 	li $t9,1
 	sort:
@@ -269,25 +331,26 @@ prl:
 	sort_end:	
 	
 	#brightness sorted here, just change pixel to valid value now
-	lw $a0, 16($sp)
-	srl $a0,$a0,16
-	jal write_pixel
+	lw $a0, 16($sp) # show procedure id to take for writing (pair id, brightness in $a0 now)
+	srl $a0,$a0,16 #show procedure id to take for writing (only id in $a0 now)
+	jal write_pixel # call procedure - it will do rest of things needed
 	# now $t0 is valid pixel id
 	
 	
 				
-	addiu $t7,$t7,1
+	addiu $t7,$t7,1 # progress next block
 	j prl
 prl_end:
 
-	addu $sp,$sp,36 # zwolnij miejsce na brightness + id pixela
+	addu $sp,$sp,36 # free place on stack needed for brightnesses with ids
+
+	# Now whole line is processed and the result is on place showed by pl
 
 ##################################################################################		
-## END OF ACTUAL PROCESSING							
+## Saving acctual line if it isnt end						
 ##################################################################################		
 
 	beqz $s7, end_p3l_loop #when no more lines, end loop
-	
 	
 	## SYSCALL (write line to file)
 	li $v0, 15 # write-to-file service
@@ -295,7 +358,7 @@ prl_end:
 	lw $t0, pl
 	la $a1, 0($t0) # show system place to read from
 	move $a2, $s6 # write a line size from showed pointer
-	syscall # write whole line
+	syscall # write whole line (processed, with is next in order)
 	
 	## SYSCALL (read next line from source file)
 	li $v0, 14 # read-from-file service
@@ -303,8 +366,9 @@ prl_end:
 	lw $t0, fl
 	la $a1, 0($t0) # show system place for writing
 	move $a2, $s6 # limit is the line size
-	syscall # read whole line	
+	syscall # read whole line (next in order)
 	
+	# swap fl,sl,tl (new order)
 	## t0,$t1,$t2 - tmp value for swap
 	lw $t0,fl
 	lw $t1,sl
@@ -314,11 +378,16 @@ prl_end:
 	sw $t0,tl
 	## t0,$t1,$t2 - free
 
-	addiu $s7,$s7,-1 # we made 3 lines
+	addiu $s7,$s7,-1 # process next line
 	j p3l_loop # }
 end_p3l_loop: 
 
-	#@todo: save last 3 lines manualy
+	# Now all lines are processed and all without last 2 are saved in target file
+
+##################################################################################		
+## Saving last two lines, free stack
+##################################################################################
+
 	## SYSCALL (write line to file)
 	li $v0, 15 # write-to-file service
 	move $a0, $s5 # show system file descriptor 
@@ -333,12 +402,14 @@ end_p3l_loop:
 	la $a1, 0($t0)
 	syscall # write whole line
 
-
 	## $s7 - FREE
 	# free stack of line information
 	addu $sp,$sp,$s6
 	addu $sp,$sp,$s6
 	addu $sp,$sp,$s6
+	addu $sp,$sp,$s6
+	
+	# Now all lines are saved and stack is free, its about the end
 
 	
 exit:
@@ -407,10 +478,10 @@ take_pixel_b: # calculate $a0 pixel in block brightness and save in $a0 with id 
 	lb $t5,2($t3)
 	andi $t5,$t5,0x000000ff
 	addu $t4,$t4,$t5
+	# t4 is calculated brightness now
 	
-	
-	sll $a0,$a0,16
-	addu $a0,$a0,$t4
+	sll $a0,$a0,16   #make pair id brightness
+	addu $a0,$a0,$t4 #..
 	
 	jr $ra
 
